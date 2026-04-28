@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Environment files
+.env
+.env.local
+
+# Models and large files (download separately)
+models/
+*.bin
+*.safetensors
+*.gguf
+
+# Benchmark results (regenerated)
+results/
+*.csv
+*.log
+
+# Database files
+*.db
+*.sqlite
+postgres-data/
+
+# OS
+.DS_Store
+Thumbs.db
