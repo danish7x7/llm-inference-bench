@@ -1,0 +1,261 @@
+{
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 1,
+    "id": null,
+    "links": [],
+    "liveNow": false,
+    "panels": [
+      {
+        "type": "row",
+        "title": "Headline metrics",
+        "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+        "id": 100,
+        "collapsed": false,
+        "panels": []
+      },
+  
+      {
+        "type": "stat",
+        "title": "Best throughput observed (tok/s)",
+        "id": 1,
+        "gridPos": { "h": 5, "w": 8, "x": 0, "y": 1 },
+        "datasource": { "type": "postgres", "uid": "Postgres" },
+        "options": {
+          "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "decimals": 1,
+            "unit": "none",
+            "color": { "mode": "thresholds" },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "blue", "value": null },
+                { "color": "green", "value": 100 }
+              ]
+            }
+          }
+        },
+        "targets": [
+          {
+            "datasource": { "type": "postgres", "uid": "Postgres" },
+            "format": "table",
+            "rawSql": "SELECT MAX(throughput_tok_s) AS best_throughput FROM v_latest_results;",
+            "refId": "A"
+          }
+        ]
+      },
+  
+      {
+        "type": "stat",
+        "title": "Marlin speedup vs generic AWQ (Mistral 7B, batch=4)",
+        "id": 2,
+        "gridPos": { "h": 5, "w": 8, "x": 8, "y": 1 },
+        "datasource": { "type": "postgres", "uid": "Postgres" },
+        "options": {
+          "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "none"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "decimals": 2,
+            "unit": "none",
+            "color": { "mode": "fixed", "fixedColor": "purple" }
+          }
+        },
+        "targets": [
+          {
+            "datasource": { "type": "postgres", "uid": "Postgres" },
+            "format": "table",
+            "rawSql": "SELECT (marlin.tps / generic.tps) AS speedup_x FROM (SELECT throughput_tok_s AS tps FROM v_latest_results WHERE model_alias='mistral-7b' AND kernel='awq_marlin' AND batch_size=4 AND prompt_set='medium' LIMIT 1) marlin, (SELECT throughput_tok_s AS tps FROM v_latest_results WHERE model_alias='mistral-7b' AND kernel='awq' AND batch_size=4 AND prompt_set='medium' LIMIT 1) generic;",
+            "refId": "A"
+          }
+        ]
+      },
+  
+      {
+        "type": "stat",
+        "title": "vLLM speedup vs HF (TinyLlama, batch=4)",
+        "id": 3,
+        "gridPos": { "h": 5, "w": 8, "x": 16, "y": 1 },
+        "datasource": { "type": "postgres", "uid": "Postgres" },
+        "options": {
+          "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "none"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "decimals": 2,
+            "unit": "none",
+            "color": { "mode": "fixed", "fixedColor": "orange" }
+          }
+        },
+        "targets": [
+          {
+            "datasource": { "type": "postgres", "uid": "Postgres" },
+            "format": "table",
+            "rawSql": "SELECT (vllm.tps / hf.tps) AS speedup_x FROM (SELECT throughput_tok_s AS tps FROM v_latest_results WHERE model_alias='tinyllama' AND runner_name='vllm' AND batch_size=4 AND prompt_set='medium' LIMIT 1) vllm, (SELECT throughput_tok_s AS tps FROM v_latest_results WHERE model_alias='tinyllama' AND runner_name='hf' AND batch_size=4 AND prompt_set='medium' LIMIT 1) hf;",
+            "refId": "A"
+          }
+        ]
+      },
+  
+      {
+        "type": "row",
+        "title": "Throughput",
+        "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+        "id": 101,
+        "collapsed": false,
+        "panels": []
+      },
+  
+      {
+        "type": "barchart",
+        "title": "Throughput vs batch size — by config (medium prompts)",
+        "id": 4,
+        "gridPos": { "h": 9, "w": 12, "x": 0, "y": 7 },
+        "datasource": { "type": "postgres", "uid": "Postgres" },
+        "options": {
+          "orientation": "auto",
+          "xField": "batch_size",
+          "showValue": "auto",
+          "stacking": "none",
+          "groupWidth": 0.7,
+          "barWidth": 0.9,
+          "barRadius": 0,
+          "fullHighlight": false,
+          "tooltip": { "mode": "single", "sort": "none" },
+          "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom", "calcs": [] }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "palette-classic" },
+            "custom": { "axisLabel": "tokens / second", "axisPlacement": "auto" },
+            "unit": "none"
+          }
+        },
+        "targets": [
+          {
+            "datasource": { "type": "postgres", "uid": "Postgres" },
+            "format": "table",
+            "rawSql": "SELECT batch_size, SUM(CASE WHEN model_alias='tinyllama' AND runner_name='hf' THEN throughput_tok_s END) AS \"HF TinyLlama (fp16)\", SUM(CASE WHEN model_alias='tinyllama' AND runner_name='vllm' THEN throughput_tok_s END) AS \"vLLM TinyLlama (fp16)\", SUM(CASE WHEN model_alias='mistral-7b' AND kernel='awq' THEN throughput_tok_s END) AS \"vLLM Mistral-7B (AWQ generic)\", SUM(CASE WHEN model_alias='mistral-7b' AND kernel='awq_marlin' THEN throughput_tok_s END) AS \"vLLM Mistral-7B (AWQ Marlin)\" FROM v_latest_results WHERE prompt_set='medium' GROUP BY batch_size ORDER BY batch_size;",
+            "refId": "A"
+          }
+        ]
+      },
+  
+      {
+        "type": "barchart",
+        "title": "TTFT (ms) by prompt length and config",
+        "id": 5,
+        "description": "Prefill cost. Notice: TTFT scales with prompt length (more input = more compute) but is roughly invariant to batch size — that's PagedAttention parallelizing across the batch.",
+        "gridPos": { "h": 9, "w": 12, "x": 12, "y": 7 },
+        "datasource": { "type": "postgres", "uid": "Postgres" },
+        "options": {
+          "orientation": "auto",
+          "xField": "prompt_set",
+          "showValue": "auto",
+          "stacking": "none",
+          "groupWidth": 0.7,
+          "barWidth": 0.9,
+          "tooltip": { "mode": "single", "sort": "none" },
+          "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": { "mode": "palette-classic" },
+            "custom": { "axisLabel": "milliseconds", "axisPlacement": "auto" },
+            "unit": "ms"
+          }
+        },
+        "targets": [
+          {
+            "datasource": { "type": "postgres", "uid": "Postgres" },
+            "format": "table",
+            "rawSql": "SELECT prompt_set, SUM(CASE WHEN model_alias='tinyllama' AND runner_name='vllm' THEN ttft_ms END) AS \"vLLM TinyLlama\", SUM(CASE WHEN model_alias='mistral-7b' AND kernel='awq' THEN ttft_ms END) AS \"vLLM Mistral-7B (AWQ)\", SUM(CASE WHEN model_alias='mistral-7b' AND kernel='awq_marlin' THEN ttft_ms END) AS \"vLLM Mistral-7B (Marlin)\" FROM v_latest_results WHERE batch_size=1 GROUP BY prompt_set ORDER BY CASE prompt_set WHEN 'short' THEN 1 WHEN 'medium' THEN 2 WHEN 'long' THEN 3 END;",
+            "refId": "A"
+          }
+        ]
+      },
+  
+      {
+        "type": "row",
+        "title": "Detail",
+        "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+        "id": 102,
+        "collapsed": false,
+        "panels": []
+      },
+  
+      {
+        "type": "table",
+        "title": "All benchmark results (latest per configuration)",
+        "id": 6,
+        "gridPos": { "h": 12, "w": 24, "x": 0, "y": 17 },
+        "datasource": { "type": "postgres", "uid": "Postgres" },
+        "options": {
+          "showHeader": true,
+          "footer": { "show": false, "reducer": ["sum"], "fields": "" },
+          "cellHeight": "sm"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "auto",
+              "cellOptions": { "type": "auto" }
+            }
+          },
+          "overrides": [
+            { "matcher": { "id": "byName", "options": "throughput_tok_s" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } }, { "id": "color", "value": { "mode": "continuous-BlPu" } }] },
+            { "matcher": { "id": "byName", "options": "ttft_ms" },          "properties": [{ "id": "unit", "value": "ms" }] },
+            { "matcher": { "id": "byName", "options": "mean_itl_ms" },      "properties": [{ "id": "unit", "value": "ms" }] }
+          ]
+        },
+        "targets": [
+          {
+            "datasource": { "type": "postgres", "uid": "Postgres" },
+            "format": "table",
+            "rawSql": "SELECT runner_name AS runner, model_alias AS model, kernel, prompt_set, batch_size, ROUND(ttft_ms::numeric, 1) AS ttft_ms, ROUND(mean_itl_ms::numeric, 2) AS mean_itl_ms, ROUND(throughput_tok_s::numeric, 1) AS throughput_tok_s, output_tokens FROM v_latest_results ORDER BY model_alias, runner_name, kernel, CASE prompt_set WHEN 'short' THEN 1 WHEN 'medium' THEN 2 WHEN 'long' THEN 3 END, batch_size;",
+            "refId": "A"
+          }
+        ]
+      }
+    ],
+    "refresh": "",
+    "schemaVersion": 39,
+    "tags": ["llm", "inference", "vllm", "benchmark"],
+    "templating": { "list": [] },
+    "time": { "from": "now-30d", "to": "now" },
+    "timepicker": {},
+    "timezone": "browser",
+    "title": "LLM Inference Benchmarks",
+    "uid": "llm-inference-bench",
+    "version": 1,
+    "weekStart": ""
+  }

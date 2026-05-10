@@ -1,0 +1,27 @@
+# Auto-provisioned datasource: Grafana picks this up at startup.
+# No manual UI configuration needed — this is what makes the resume claim
+# "one-command reproducibility" honest.
+#
+# Reference: https://grafana.com/docs/grafana/latest/administration/provisioning/#data-sources
+
+apiVersion: 1
+
+datasources:
+  - name: Postgres
+    type: postgres
+    access: proxy
+    # `postgres` is the service name in docker-compose.yml; Docker DNS resolves it
+    url: postgres:5432
+    user: bench
+    secureJsonData:
+      password: bench
+    jsonData:
+      database: benchmarks
+      sslmode: disable
+      maxOpenConns: 10
+      maxIdleConns: 2
+      connMaxLifetime: 14400      # seconds
+      postgresVersion: 1600       # 16.x
+      timescaledb: false
+    isDefault: true
+    editable: false                # Locked from UI edits; source of truth is this file

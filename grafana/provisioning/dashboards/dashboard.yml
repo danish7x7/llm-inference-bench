@@ -1,0 +1,16 @@
+# Auto-load any dashboard JSON files placed in /etc/grafana/provisioning/dashboards/
+# This combined with the datasource file makes Grafana fully self-configuring.
+
+apiVersion: 1
+
+providers:
+  - name: 'llm-bench'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

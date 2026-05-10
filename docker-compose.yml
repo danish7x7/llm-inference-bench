@@ -1,0 +1,71 @@
+# LLM Inference Benchmarking Suite — service stack
+#
+# Two services:
+#   postgres : stores benchmark_results rows ingested from results/*.csv
+#   grafana  : auto-provisions a Postgres datasource + dashboard at startup
+#
+# Bring up:    docker compose up -d
+# Tear down:   docker compose down          (keeps data)
+# Reset:       docker compose down -v       (deletes data — use with care)
+#
+# Endpoints after `docker compose up`:
+#   Postgres:  localhost:5432   (user/pass: bench/bench, db: benchmarks)
+#   Grafana:   http://localhost:3000   (anonymous read-only access enabled)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bench-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: benchmarks
+      POSTGRES_USER: bench
+      POSTGRES_PASSWORD: bench
+    ports:
+      - "5432:5432"
+    volumes:
+      # Persist data across `docker compose down` (without -v).
+      # Path matches .gitignore entry to keep this out of git.
+      - ./postgres-data:/var/lib/postgresql/data
+      # init.sql runs only on first startup (when the data volume is empty).
+      # Idempotent — uses CREATE IF NOT EXISTS.
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bench -d benchmarks"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana-oss:11.3.0
+    container_name: bench-grafana
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      # Anonymous viewer access — for a portfolio piece this is the right call.
+      # Anyone hitting localhost:3000 can see the dashboard, not edit it.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      # Skip the welcome screens
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Admin login still works (admin / admin) for editing
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # Default home dashboard — auto-opens our benchmark dashboard
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/llm-bench.json
+    volumes:
+      # Provisioning files — read-only, baked into the container at startup
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      # Dashboard JSON lives alongside its provisioning config so Grafana can
+      # find it via the path declared in dashboard.yml
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      # Persist dashboard edits across restarts
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  grafana-data:
