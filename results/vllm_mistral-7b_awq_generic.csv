@@ -1,0 +1,10 @@
+runner_name,model_alias,model_id,kernel,quantization,dtype,max_model_len,prompt_set,batch_size,max_new_tokens,ttft_ms,mean_itl_ms,p90_itl_ms,p99_itl_ms,total_latency_ms,output_tokens,throughput_tok_s,input_tokens,gpu_mem_used_mb,gpu_mem_reserved_mb,vllm_version,transformers_version,torch_version,timestamp,schema_version
+vllm,mistral-7b,TheBloke/Mistral-7B-Instruct-v0.2-AWQ,awq,awq,auto,2048,short,1,256,2651.7,127.34,140.08,152.81,17677.98,118,6.67,8,6686.6,6686.6,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T20:01:00,2-backfill
+vllm,mistral-7b,TheBloke/Mistral-7B-Instruct-v0.2-AWQ,awq,awq,auto,2048,short,2,256,2590.03,86.85,95.53,104.21,17266.89,169,9.79,13,6685.7,6685.7,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T20:01:35,2-backfill
+vllm,mistral-7b,TheBloke/Mistral-7B-Instruct-v0.2-AWQ,awq,awq,auto,2048,short,4,256,3037.32,49.89,54.88,59.87,20248.8,345,17.04,28,6674.8,6674.8,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T20:02:16,2-backfill
+vllm,mistral-7b,TheBloke/Mistral-7B-Instruct-v0.2-AWQ,awq,awq,auto,2048,medium,1,256,5715.63,126.52,139.17,151.82,38104.17,256,6.72,10,6674.8,6674.8,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T20:03:37,2-backfill
+vllm,mistral-7b,TheBloke/Mistral-7B-Instruct-v0.2-AWQ,awq,awq,auto,2048,medium,2,256,6209.31,68.72,75.6,82.47,41395.41,512,12.37,24,6673.8,6673.8,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T20:05:03,2-backfill
+vllm,mistral-7b,TheBloke/Mistral-7B-Instruct-v0.2-AWQ,awq,awq,auto,2048,medium,4,256,6172.11,34.16,37.57,40.99,41147.41,1024,24.89,46,6712.8,6712.8,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T20:06:27,2-backfill
+vllm,mistral-7b,TheBloke/Mistral-7B-Instruct-v0.2-AWQ,awq,awq,auto,2048,long,1,256,5717.7,126.56,139.22,151.88,38117.99,256,6.72,29,6674.1,6674.1,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T20:07:46,2-backfill
+vllm,mistral-7b,TheBloke/Mistral-7B-Instruct-v0.2-AWQ,awq,awq,auto,2048,long,2,256,6111.26,67.64,74.4,81.17,40741.73,512,12.57,59,6766.8,6766.8,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T20:09:09,2-backfill
+vllm,mistral-7b,TheBloke/Mistral-7B-Instruct-v0.2-AWQ,awq,awq,auto,2048,long,4,256,6021.86,33.32,36.66,39.99,40145.71,1024,25.51,118,6749.1,6749.1,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T20:10:33,2-backfill

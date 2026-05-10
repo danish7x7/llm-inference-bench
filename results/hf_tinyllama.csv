@@ -1,0 +1,7 @@
+runner_name,model_alias,model_id,kernel,quantization,dtype,max_model_len,prompt_set,batch_size,max_new_tokens,ttft_ms,mean_itl_ms,p90_itl_ms,p99_itl_ms,total_latency_ms,output_tokens,throughput_tok_s,input_tokens,gpu_mem_used_mb,gpu_mem_reserved_mb,vllm_version,transformers_version,torch_version,timestamp,schema_version
+hf,tinyllama,TinyLlama/TinyLlama-1.1B-Chat-v1.0,hf_none,none,auto,2048,short,1,256,32.6,20.42,22.82,24.02,1033.43,49,47.42,23,2989.6,2989.6,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T19:22:06,2-backfill
+hf,tinyllama,TinyLlama/TinyLlama-1.1B-Chat-v1.0,hf_none,none,auto,2048,short,2,256,27.98,10.25,10.25,10.25,1176.29,114,96.92,46,2993.6,2993.6,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T19:22:09,2-backfill
+hf,tinyllama,TinyLlama/TinyLlama-1.1B-Chat-v1.0,hf_none,none,auto,2048,short,4,256,28.83,5.06,5.06,5.06,2842.54,560,197.01,108,3007.6,3007.6,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T19:22:14,2-backfill
+hf,tinyllama,TinyLlama/TinyLlama-1.1B-Chat-v1.0,hf_none,none,auto,2048,medium,1,256,28.32,18.89,20.49,23.58,4882.61,257,52.64,28,3017.2,3017.2,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T19:22:24,2-backfill
+hf,tinyllama,TinyLlama/TinyLlama-1.1B-Chat-v1.0,hf_none,none,auto,2048,medium,2,256,24.91,9.92,9.92,9.92,5086.16,512,100.67,56,3017.2,3017.2,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T19:22:34,2-backfill
+hf,tinyllama,TinyLlama/TinyLlama-1.1B-Chat-v1.0,hf_none,none,auto,2048,medium,4,256,26.89,5.09,5.09,5.09,5223.27,1024,196.05,112,3033.2,3033.2,0.20.0,5.6.2,2.11.0+cu129,2026-05-09T19:22:46,2-backfill

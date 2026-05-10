@@ -25,10 +25,20 @@ models/
 *.safetensors
 *.gguf
 
-# Benchmark results (regenerated)
-results/
-*.csv
+# Benchmark results — CSVs in results/ are gitignored by default, with explicit
+# exceptions below for the four sample CSVs that ship with the repo (so the
+# dashboard has data when someone clones).
+#
+# We use `results/*.csv` instead of `results/` so git still descends into the
+# directory and can apply the `!` negation rules to specific files.
+results/*.csv
+results/*.log
 *.log
+
+!results/hf_tinyllama.csv
+!results/vllm_tinyllama.csv
+!results/vllm_mistral-7b_awq_generic.csv
+!results/vllm_mistral-7b_awq_marlin.csv
 
 # Database files
 *.db
