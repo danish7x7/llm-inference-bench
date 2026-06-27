@@ -1,64 +1,102 @@
 # LLM Inference Benchmarking Suite
 
-Reproducible throughput, TTFT, and inter-token-latency measurements for **vLLM** and **HuggingFace Transformers** on quantized open-source models, running on a single consumer GPU. Postgres for storage, Grafana for visualization, Docker Compose for one-command bring-up.
-
 ![Dashboard](docs/dashboard.png)
 
-## Headline findings
+## What it is
 
-> Hardware: NVIDIA RTX 4060 Laptop, 8 GB VRAM, CUDA 12.7, vLLM 0.20.0, transformers 4.40+
+A benchmarking harness for LLM inference on consumer GPU hardware. It measures the four numbers that actually decide whether a serving setup is viable — **time-to-first-token (TTFT), inter-token latency (ITL, with p90/p99), throughput, and VRAM** — across two backends, **vLLM** and **HuggingFace Transformers**, behind a single pluggable `InferenceRunner` interface. Every run is written to a **versioned, reproducible CSV schema** (kernel, quantization, dtype, `max_model_len`, and the `vllm`/`transformers`/`torch` versions are on every row), and results flow into a **Postgres + Grafana** stack via `docker compose` for storage and visualization.
 
-| Finding | Number | What it means |
+## Why it exists
+
+The goal is to understand the internals of production inference systems by building against them on real hardware — KV cache, paged attention, continuous batching, quantization kernels — rather than reading about them. That means the methodology has to be honest, because the methodology is the point: distinct prompts so prefix caching doesn't silently inflate the numbers, a discarded warmup run per config so first-call JIT/graph-capture costs don't leak into the measurement, and version columns so a row from today stays comparable across vLLM upgrades. The interesting results in this repo came from getting those choices right — and from catching where I'd gotten one wrong.
+
+## What was learned
+
+### Getting vLLM to initialize at all under WSL2
+
+The hardest part wasn't measuring inference — it was getting the engine to start on a laptop 4060 under WSL2. Three failures, each tracing to a specific step in how vLLM brings up its engine:
+
+**Stale driver.** torch and vLLM here are CUDA-13 pip builds, but the machine shipped with driver `566.24` / CUDA 12.7. CUDA is forward-compatible at the driver level only up to a point; a CUDA-13 runtime needs a driver that advertises 13.x. The symptom was torch failing to see the GPU at all. Fix: update the NVIDIA driver on the Windows side (WSL inherits it) to a CUDA-13-capable release. torch + vLLM are pinned to each other for exactly this reason — bumping torch independently re-breaks the CUDA contract.
+
+**`UVA is not available`.** With the driver fixed, vLLM's newer **V2 model runner** crashed during engine init. The V2 runner assumes Unified Virtual Addressing — a single address space shared across host and device — to manage its KV/tensor allocations. WSL's GPU paravirtualization doesn't expose UVA, so init aborts. Forcing the V1 runner (`VLLM_USE_V2_MODEL_RUNNER=0`) sidesteps it with no functional loss on a single GPU.
+
+**`Could not find nvcc`.** Next, the **FlashInfer sampler** failed. vLLM can route top-p/top-k sampling through a FlashInfer kernel that is **JIT-compiled at first use**, which needs `nvcc`. This box has only the pip CUDA *runtime* libraries — no system toolkit, no compiler — so the JIT can't build. Disabling it (`VLLM_USE_FLASHINFER_SAMPLER=0`) falls back to native PyTorch sampling, which is correct and fast enough for single-GPU. (A related JIT path, `deep_gemm`, fails its import with `AssertionError` on `cuda_home is None` and falls back gracefully — harmless, ignore it.)
+
+Both env vars now live as `os.environ.setdefault(...)` at the top of `src/runners/vllm_runner.py`, set before any `import vllm`, so the workarounds travel with the code instead of living in a shell profile. Verified by running with both unset from the environment: clean startup, no nvcc/UVA errors. The startup log line `FlashInfer top-p/top-k sampling disabled via VLLM_USE_FLASHINFER_SAMPLER=0` confirms the env var is reaching the engine.
+
+The transferable lesson: most of vLLM's "it won't start" failures under WSL are about **what the engine tries to JIT-compile or memory-map at init**, not about the model. Read the startup log top to bottom before touching the model registry.
+
+### Batch-size scaling — and the prefix-caching artifact I had to catch
+
+A batch sweep on TinyLlama-1.1B (fp16) gives the textbook shape: throughput climbs with batch as each forward pass amortizes its fixed cost (kernel launches, weight reads from HBM) across more sequences, while TTFT rises because more requests share each prefill pass. Concretely, on distinct prompts:
+
+| Batch | Throughput (tok/s) | TTFT (ms) | Mean ITL (ms) | vs batch 1 |
+|------:|-------------------:|----------:|--------------:|-----------:|
+| 1     | 100.3              | 72        | 8.5           | 1.0×       |
+| 4     | 267.1              | 191       | 3.2           | 2.66×      |
+| 8     | 413.9              | 194       | 2.0           | 4.13×      |
+| 16    | 606.3              | 359       | 1.4           | **6.04×**  |
+
+The interesting part is what almost went unnoticed. My **first** sweep used a 4-prompt set, so at batch 8 and 16 the prompts repeated — and with vLLM's prefix caching on, the repeated prefixes shared KV cache and skipped recomputation. That run reported **9.7× at batch 16**. It looked great and it was wrong: I was measuring prefix-cache hit rate, not batching scaling. Re-running with **16 distinct prompts** (no two sharing a prefix) collapsed the number to **6.0×** — prefix caching had been responsible for roughly **60% of the apparent gain** at batch 16.
+
+The distinct-prompt run also exposed a TTFT wall the cached run had hidden: TTFT held a ~190 ms plateau through batch 8, then **jumped to 359 ms at batch 16**. That's **prefill saturation** — prefill is compute-bound, and once the combined prefill work of 16 unique prompts exceeds what one pass can overlap, the prefills serialize against the tensor cores and every request's first-token wait climbs. The cached run never hit it because there was barely any prefill to do. (Full writeups: [`docs/batch-sweep.md`](docs/batch-sweep.md), [`docs/batch-sweep-v2.md`](docs/batch-sweep-v2.md).)
+
+### One config string was worth 9× — *(re-verified ~10× on vLLM 0.23.0, 2026-06-26)*
+
+On the earlier 0.20.0 stack, a Mistral-7B run produced ~7 tok/s — the model loaded, but throughput was nonsensical. The diagnostic was one line in the vLLM startup log:
+
+```
+Detected that the model can run with awq_marlin, however you specified
+quantization=awq explicitly, so forcing awq. Use quantization=awq_marlin
+for faster inference
+```
+
+vLLM's generic AWQ kernel dequantizes 4-bit weights to fp16 in registers and runs a standard GEMM; the **Marlin** kernel fuses dequant into a tensor-core-friendly INT4×FP16 matmul. Switching `quantization="awq_marlin"` — a one-string change — delivered a ~9–10× throughput jump with nothing else touched. It's the most dramatic result in the project, and it isn't algorithmic; it's a configuration default.
+
+**Re-verified on the current stack (vLLM 0.23.0, 2026-06-26).** A same-session A/B on Mistral-7B (16 distinct short prompts) gives generic AWQ **6.0 tok/s vs Marlin 62.8 tok/s** at batch 1 (**10.5×**) and **34.0 vs 337.1** at batch 8 (**9.9×**) — ~10× consistent across throughput, TTFT, and ITL at both batch sizes, matching the original 9.38× (batch 4, medium) measured on 0.20.0. The A/B is clean: with `quantization=awq` set explicitly, vLLM logged *"you specified quantization=awq explicitly, so forcing awq"* and ran the generic kernel — no silent Marlin upgrade — while the Marlin side logged `Using MarlinLinearKernel`. The `mistral-7b-awq` registry entry is the generic-AWQ side, kept so the comparison reproduces.
+
+There's a second-order effect beyond raw speed. On the same 8 GB budget the Marlin run carried a **larger KV pool — 11,376 tokens / 5.55× max concurrency vs the generic kernel's 9,216 / 4.50×** (~20% more batching headroom). The 4-bit weights are identical (3.88 GiB both); the difference is CUDA-graph workspace (0.62 vs 0.74 GiB), which Marlin's tighter kernels capture into less of, leaving more VRAM for the KV cache. So kernel choice is a **concurrency** decision as much as a throughput one. Mechanism and the original 0.20.0 CSVs are in [`docs/prefill_vs_decode.md`](docs/prefill_vs_decode.md).
+
+## Experiments
+
+| Writeup | Stack | Finding |
 |---|---|---|
-| **AWQ-Marlin vs generic AWQ kernel** (vLLM, Mistral-7B, batch=4, medium prompts) | **9.38× throughput** | Kernel choice within the same engine dominates everything else |
-| **vLLM vs HF Transformers** (TinyLlama-1.1B fp16, batch=4, medium prompts) | **1.88× throughput** | Continuous batching + paged attention beat the naive baseline |
-| **Best throughput observed** (vLLM, TinyLlama, batch=4, medium prompts) | **368 tok/s** | Small model + good engine still beats big model + better kernel |
-| **TTFT scaling** (vLLM, Marlin, prompt 24 → 118 tokens) | **301 ms → 647 ms** | Prefill is compute-bound and ~linear in input length |
-| **TTFT vs batch size** (vLLM, Marlin, medium prompts) | **647 ms → 658 ms** (b=1 → b=4) | PagedAttention parallelizes prefill across the batch |
-| **ITL drop with batch size** (vLLM, Marlin, medium prompts) | **14.3 ms → 3.6 ms/token** (b=1 → b=4) | Decode is memory-bandwidth-bound and amortizes across batch |
+| [`docs/batch-sweep-v2.md`](docs/batch-sweep-v2.md) | vLLM 0.23.0 | True batch scaling on distinct prompts: **6.0× throughput** batch 1→16; TTFT saturates at batch 16 (359 ms). |
+| [`docs/batch-sweep.md`](docs/batch-sweep.md) | vLLM 0.23.0 | Original 4-prompt sweep; reported 9.7× — later shown to be **~60% prefix-cache inflation** at batch 16. |
+| [`docs/prefill_vs_decode.md`](docs/prefill_vs_decode.md) | vLLM 0.20.0 (Marlin re-verified on 0.23.0) | Prefill is compute-bound, decode is memory-bound; the **AWQ-Marlin ~10×** kernel discovery (9.38× orig, ~10× re-verified) and a vLLM-vs-HF **1.88×** engine comparison. |
 
-These are not abstract claims. Every number above is a row in the dashboard, recorded under a known kernel, quantization, and library version.
+## Hardware / reproducibility
 
-## Quickstart
+- **GPU:** NVIDIA RTX 4060 Laptop, **8 GB VRAM** — the binding constraint on everything (7–8B models only fit at 4-bit; `max_model_len` capped at 2048).
+- **OS:** WSL2 (Ubuntu) on Windows. Expected, not bugs: vLLM forces `spawn` multiprocessing, `pin_memory=False`, NVML not fork-compatible.
+- **Stack:** vLLM **0.23.0**, torch **2.11.0** (CUDA-13 pip build), Python **3.13**, FlashAttention 2 backend, V1 model runner. torch and vLLM versions are pinned to each other — do not bump torch alone.
+
+Smoke test (verifies the full harness end-to-end and writes a CSV):
 
 ```bash
-# 0. clone and enter
-git clone https://github.com/danish7x7/llm-inference-bench.git
-cd llm-inference-bench
+python benchmark.py --model tinyllama --runner vllm --prompts short
+```
 
-# 1. bring up Postgres + Grafana
-docker compose up -d
+Batch sweep:
 
-# 2. ingest the included sample results
+```bash
+python benchmark.py --model tinyllama --runner vllm --prompts short --batch-sizes 1 2 4 8 16
+```
+
+Results land in `results/<runner>_<model>_<timestamp>.csv` with all schema-v2 columns. The WSL env-var workarounds are applied automatically from `vllm_runner.py`; no shell setup required.
+
+### Storage + dashboard
+
+The Postgres + Grafana stack is optional and brought up with one command:
+
+```bash
+docker compose up -d                       # Postgres 16 + Grafana 11 (provisioned)
 pip install psycopg2-binary
-python scripts/load_results.py --truncate
-
-# 3. open the dashboard
+python scripts/load_results.py --truncate   # ingest results/*.csv
 # → http://localhost:3000  (anonymous viewer; admin/admin to edit)
 ```
 
-That's it. The sample results in `results/` were captured on the hardware above and are populated into the dashboard automatically. To run benchmarks of your own (requires CUDA + vLLM):
-
-```bash
-# vLLM smoke test on TinyLlama (1.1B, fp16, no GPU memory pressure)
-python scripts/smoke_test.py --runner vllm
-
-# Real benchmark sweep
-python benchmark.py --model mistral-7b --runner vllm \
-                    --prompts short medium long \
-                    --batch-sizes 1 2 4
-```
-
-CSVs land in `results/` with all 25 schema-v2 columns including the kernel, quantization, dtype, and library versions used. Re-run `load_results.py` to ingest the new rows.
-
-## What this project is built to demonstrate
-
-This is a portfolio piece for inference-engineering roles. The four engineering claims I want it to support:
-
-1. **End-to-end benchmarking framework** - pluggable `InferenceRunner` interface, two implementations (vLLM and HF), CLI for sweep matrices, schema-versioned CSV output, Postgres ingestion.
-2. **Quantified kernel and engine effects separately** - by holding model and quantization fixed and only varying the kernel (`awq` vs `awq_marlin`), I can attribute the 9.38× speedup to the kernel choice alone, distinct from the 1.88× engine speedup measured against HF.
-3. **Production-shaped infrastructure** - service-oriented stack (Postgres, Grafana), automated provisioning (no UI clicks), Docker Compose, anonymous read-only Grafana access for sharing.
-4. **Honest measurement methodology** - TTFT and ITL come from different sources for different runners; this is documented in `docs/prefill_vs_decode.md` rather than papered over.
+`schema_version` is on every row, so rows from different vLLM versions remain comparable in the same database. The datasource and dashboard are provisioned from `grafana/provisioning/` — no UI clicks.
 
 ## Architecture
 
@@ -78,96 +116,37 @@ flowchart LR
     end
 
     GF --> USER(["http://localhost:3000"])
-
-    style CLI fill:#1e3a8a,stroke:#3b82f6,color:#fff
-    style PG  fill:#3f6212,stroke:#84cc16,color:#fff
-    style GF  fill:#7c2d12,stroke:#f97316,color:#fff
 ```
 
-**Why the layers:** the `InferenceRunner` abstraction means swapping in another backend (SGLang, TensorRT-LLM, …) is a matter of one new file implementing `load() / run() / unload()`. The CSV-then-Postgres flow means benchmarks can run on a GPU machine without any DB infrastructure, and the database can be populated from any number of remote runs by `scp`-ing CSVs.
-
-## Notable engineering decisions
-
-### vLLM was not using the optimized AWQ kernel by default
-
-The first Mistral-7B benchmark produced ~7 tok/s - the model was running, but the throughput was nonsensically low. The diagnostic was buried in the vLLM startup logs:
-
-```
-Detected that the model can run with awq_marlin, however you specified
-quantization=awq explicitly, so forcing awq. Use quantization=awq_marlin
-for faster inference
-```
-
-vLLM's generic AWQ kernel does not use the Marlin optimized layout for Ada/Ampere tensor cores. Switching `quantization="awq_marlin"` in the model registry produced a **9.38× speedup with zero other changes**. Both CSVs are kept in `results/` (`vllm_mistral-7b_awq_generic.csv` and `vllm_mistral-7b_awq_marlin.csv`) so the comparison is reproducible from this repo. See `docs/prefill_vs_decode.md` for the full discussion.
-
-### HF's TextIteratorStreamer cannot batch
-
-HuggingFace's per-token streamer fundamentally only supports `batch_size=1`. The benchmark needed real per-token timing at batch=1 *and* honest TTFT measurement at batch>1 - these have different right answers. The runner now dispatches:
-
-- `batch_size == 1` → `TextIteratorStreamer`, true per-token timing
-- `batch_size > 1`  → two-phase generate: a `max_new_tokens=1` probe to measure pure prefill latency, then full generation; ITL is averaged across the decode portion. The `notes` column on the result tags this as `ttft_quality=two_phase`.
-
-### Schema versioning
-
-Every benchmark row records the kernel, quantization, dtype, max_model_len, and the `vllm`/`transformers`/`torch` versions used. `schema_version` is on every row. This means a row from today and a row from six months and three vLLM upgrades later remain comparable in the same database, and a reviewer can see exactly what was running. The 30 sample rows shipped in this repo are tagged `2-backfill` (upgraded from the v1 schema by `scripts/backfill_csv_schema.py`).
-
-### Known limitations (called out, not hidden)
-
-- **VRAM column reflects vLLM's pre-allocated KV pool, not active usage.** vLLM reserves its KV cache pool at engine startup based on `gpu_memory_utilization`; `pynvml` reads this as "used" regardless of how many tokens are actually live. Honest fix would be reading vLLM's own KV-cache utilization metric or computing analytically from token count × dtype × layers. Documented but not yet implemented.
-- **HF batch>1 ITL p90/p99 collapse to the mean.** The two-phase path averages across the decode window - accurate aggregate, no distribution. By design.
-- **TTFT measurement methodology differs across backends.** vLLM uses `RequestMetrics.first_token_time`; HF batch=1 uses streamer first-yield; HF batch>1 uses the prefill-only probe. Not directly comparable across runners as a percentile, but each within-runner comparison is honest.
+**Why the layers:** the `InferenceRunner` abstraction (`load() / run() / unload()`) means adding a backend — SGLang, TensorRT-LLM — is one new file. The CSV-then-Postgres flow means benchmarks run on a GPU box with no DB infrastructure, and the database can be populated from any number of remote runs by copying CSVs.
 
 ## File map
 
 ```
 .
-├── benchmark.py                 # CLI entry point, model registry, schema v2 CSV writer
+├── benchmark.py                 # CLI entry, model registry, schema-v2 CSV writer
 ├── docker-compose.yml           # Postgres + Grafana
-├── postgres/init.sql            # benchmark_results table + indexes + v_latest_results view
-├── grafana/provisioning/        # auto-wired datasource and dashboard (no UI clicks)
+├── postgres/init.sql            # benchmark_results table + indexes + view
+├── grafana/provisioning/        # auto-wired datasource + dashboard
 ├── src/
 │   ├── runners/
 │   │   ├── base.py              # InferenceRunner interface + GenerationConfig + RunResult
-│   │   ├── vllm_runner.py       # vLLM with chat template, RequestMetrics, Marlin kernel
-│   │   └── hf_runner.py         # HF with two-path dispatch, AWQ pre-quantization detection
-│   ├── metrics.py               # TTFT, ITL, throughput, GPU memory (pynvml + torch fallback)
-│   └── storage.py               # Postgres ingestion (psycopg2 bulk insert with type coercion)
+│   │   ├── vllm_runner.py       # vLLM backend; WSL env workarounds; chat template; RequestMetrics
+│   │   └── hf_runner.py         # HF backend; two-path dispatch for batched TTFT
+│   ├── metrics.py               # TTFT, ITL, throughput, GPU memory
+│   └── storage.py               # Postgres ingestion
 ├── prompts/                     # short/medium/long prompt sets
-├── scripts/
-│   ├── smoke_test.py            # quick sanity check on TinyLlama
-│   ├── backfill_csv_schema.py   # one-shot v1 → v2 CSV upgrade
-│   └── load_results.py          # CLI: ingest results/*.csv to Postgres
-├── results/                     # benchmark CSVs (kept in repo for the included samples)
-└── docs/
-    ├── dashboard.png            # screenshot used in this README
-    └── prefill_vs_decode.md     # technical writeup: prefill bound, decode bound, kernel impact
+├── scripts/                     # smoke_test.py, load_results.py, backfill_csv_schema.py
+├── results/                     # benchmark CSVs (sample rows kept in repo)
+└── docs/                        # experiment writeups + dashboard.png
 ```
 
-## Reproducing the headline numbers
+## What's next
 
-```bash
-# Prerequisites: NVIDIA GPU with CUDA 12.7+, vLLM 0.20.0, autoawq, ~6 GB free VRAM.
-# (Pre-built environment notes in CHANGELOG.md.)
-
-# Marlin kernel: 9× speedup story
-python benchmark.py --model mistral-7b --runner vllm \
-                    --prompts short medium long --batch-sizes 1 2 4
-# CSV will be tagged kernel=awq_marlin in the schema.
-
-# Engine comparison: vLLM ~2× HF on TinyLlama
-python benchmark.py --model tinyllama --runner vllm \
-                    --prompts short medium --batch-sizes 1 2 4
-python benchmark.py --model tinyllama --runner hf \
-                    --prompts short medium --batch-sizes 1 2 4
-
-# Ingest into Postgres (Grafana auto-refreshes every 30 s)
-python scripts/load_results.py
-```
+- **gpu-memory-utilization sweep** — how effective KV-cache size and max concurrency scale with `gpu_memory_utilization` (vLLM logs both at startup). The clearest single-GPU view of the memory-vs-concurrency tradeoff.
+- **fp16 vs AWQ quantization comparison** on a model where both fit — latency, throughput, VRAM in one table.
+- **A vLLM contribution.** The endgame for this project is upstreaming something small and real — a doc fix for the WSL/UVA/nvcc init failures above, or a scheduler/metrics improvement found while profiling here.
 
 ## License
 
 MIT.
-
----
-
-*Built as a focused study in modern LLM inference performance. The interesting story is not what is expected as "Engine A vs Engine B" but how dramatically a single kernel-config string can change the answer.*

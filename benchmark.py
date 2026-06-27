@@ -48,6 +48,15 @@ MODEL_REGISTRY = {
         # is incompatible with current transformers; HF benchmarks live on TinyLlama only.
         "hf_load_in_4bit": False,
     },
+    "mistral-7b-awq": {
+        # Generic-AWQ side of an A/B against the "mistral-7b" (awq_marlin) entry.
+        # Every field is identical except quantization, so the only variable is the
+        # kernel — this isolates the Marlin speedup from everything else.
+        "model_id": "TheBloke/Mistral-7B-Instruct-v0.2-AWQ",
+        "quantization": "awq",
+        "max_model_len": 2048,
+        "hf_load_in_4bit": False,
+    },
     "llama-3-8b": {
         "model_id": "casperhansen/llama-3-8b-instruct-awq",
         "quantization": "awq_marlin",

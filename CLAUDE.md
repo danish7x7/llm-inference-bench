@@ -100,9 +100,13 @@ the code uses setdefault so an explicit env value wins.
 ### Models known to work / not
 - tinyllama (TinyLlama-1.1B-Chat) — reliable smoke-test model, fp16.
 - Qwen2.5-3B-Instruct-AWQ — works, 4-bit.
-- mistral-7b / llama-3-8b registry entries use awq_marlin with 2023-2024
-  configs that MAY not load on current vLLM — if they error, it's a config-
-  format mismatch, not harness logic.
+- mistral-7b (TheBloke/Mistral-7B-Instruct-v0.2-AWQ) — confirmed loading AND
+  running with the Marlin kernel active on vLLM 0.23.0 (2026-06-26). awq_marlin
+  auto-conversion works; generic awq also runs via the mistral-7b-awq entry
+  (kept as the generic side of the Marlin A/B).
+- llama-3-8b registry entry uses awq_marlin with a 2023-2024 config still
+  UNTESTED on current vLLM — if it errors, it's likely a config-format
+  mismatch, not harness logic.
 - HF runner only expected to work on tinyllama.
 
 ### How to run

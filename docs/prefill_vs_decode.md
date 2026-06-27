@@ -91,6 +91,21 @@ Our measurement on Mistral-7B at batch=4, medium prompts:
 
 The speedup is consistent across all three metrics, which tells us the kernel benefit applies uniformly to both prefill and decode - what we expect for a kernel-level optimization (it's just a faster matmul, regardless of which phase is calling it).
 
+**Re-verified on vLLM 0.23.0 (2026-06-26).** The table above was measured on vLLM 0.20.0. A same-session A/B on the current stack (Mistral-7B, 16 distinct short prompts, batches 1 and 8) confirms the effect holds:
+
+| Batch | Metric | Generic AWQ | AWQ-Marlin | Speedup |
+|------:|--------|------------:|-----------:|--------:|
+| 1 | Throughput (tok/s) | 6.0   | 62.8  | 10.5× |
+| 1 | TTFT (ms)          | 2628  | 282   | 9.3×  |
+| 1 | Mean ITL (ms)      | 141.8 | 13.5  | 10.5× |
+| 8 | Throughput (tok/s) | 34.0  | 337.1 | 9.9×  |
+| 8 | TTFT (ms)          | 2875  | 289   | 9.9×  |
+| 8 | Mean ITL (ms)      | 25.0  | 2.5   | 10.0× |
+
+The A/B is clean: with `quantization=awq` set explicitly, vLLM logged *"you specified quantization=awq explicitly, so forcing awq"* and ran the generic kernel - no silent Marlin upgrade - while the Marlin side logged `Using MarlinLinearKernel`. (The `mistral-7b-awq` registry entry is the generic side, kept so this reproduces.)
+
+There's a second-order effect worth recording: on the same 8 GB budget Marlin left a **larger KV pool** - 11,376 tokens / 5.55× max concurrency vs the generic kernel's 9,216 / 4.50×. The 4-bit weights are identical (3.88 GiB both); the difference is CUDA-graph workspace (0.62 vs 0.74 GiB), which Marlin's tighter kernels capture into less of, freeing VRAM for the KV cache. Kernel choice shapes batching headroom, not just raw speed.
+
 The diagnostic was a one-line warning in vLLM startup logs:
 
 ```
