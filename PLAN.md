@@ -30,9 +30,11 @@ Rules for keeping it honest:
 - [x] Batch-size sweep on tinyllama (1,2,4,8,16). See docs/batch-sweep.md.
       — ~9.7x throughput batch1->16; TTFT plateaus ~200ms from batch 4.
       — Caveat: only 4 distinct prompts + prefix caching may flatter high batch.
-- [ ] Re-run batch sweep with >=16 DISTINCT prompts to isolate the
-      prefix-caching effect.
-      verify: throughput curve recomputed without repeated prefixes.
+- [x] Re-run batch sweep with >=16 DISTINCT prompts to isolate the
+      prefix-caching effect. See docs/batch-sweep-v2.md.
+      — 6.1x throughput batch1->16 (vs 9.7x original); prefix caching was
+        flattering high-batch numbers by ~60%. TTFT flat ~190ms through batch=8,
+        jumps to 359ms at batch=16 (prefill saturation). ITL drops 8.5->1.4ms.
 - [ ] Quantization comparison: fp16 vs AWQ on the same model where both fit.
       Measure latency, throughput, VRAM.
       verify: a docs/ writeup with the three-way tradeoff table.
