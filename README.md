@@ -65,6 +65,17 @@ There's a second-order effect beyond raw speed. On the same 8 GB budget the Marl
 | [`docs/batch-sweep.md`](docs/batch-sweep.md) | vLLM 0.23.0 | Original 4-prompt sweep; reported 9.7× — later shown to be **~60% prefix-cache inflation** at batch 16. |
 | [`docs/prefill_vs_decode.md`](docs/prefill_vs_decode.md) | vLLM 0.20.0 (Marlin re-verified on 0.23.0) | Prefill is compute-bound, decode is memory-bound; the **AWQ-Marlin ~10×** kernel discovery (9.38× orig, ~10× re-verified) and a vLLM-vs-HF **1.88×** engine comparison. |
 
+## Methodology & known limitations
+
+These are deliberate properties of the harness, stated up front so the numbers are read correctly rather than over-trusted.
+
+- **The VRAM column is the pre-allocated KV pool, not active usage.** vLLM reserves its whole KV cache at engine startup from `gpu_memory_utilization`, and NVML reads that reservation as "used" regardless of how many tokens are live. So VRAM looks pinned at ~8 GB across batch sizes by design — it measures the budget, not the working set. (The KV-pool *capacity* in tokens, which does vary, comes from vLLM's own startup log, as in the Marlin headroom finding above.)
+- **TTFT is not apples-to-apples across backends — by construction.** vLLM TTFT comes from `RequestMetrics.first_token_time` (engine-internal). HF at `batch=1` uses a `TextIteratorStreamer` first-yield; HF at `batch>1` (streamers can't batch) runs a two-phase generate — a `max_new_tokens=1` probe to isolate prefill, then the full run — tagged `ttft_quality=two_phase`. Within-backend comparisons (vLLM b1 vs b8) are clean; cross-backend, use aggregate throughput (`output_tokens / wall_time`), which both runners define identically.
+- **HF `batch>1` p90/p99 ITL collapse to the mean.** The two-phase path averages over the decode window — an accurate aggregate but no per-token distribution. The tail-latency columns are only meaningful for vLLM and HF-`batch=1`.
+- **Single sample per config — no variance estimate.** Each (model, batch, prompt-set) cell is one run after one discarded warmup. Trust the *shape* of the curves, not the third significant figure; small run-to-run deltas are noise.
+- **Prefix caching is on (vLLM default), so prompt distinctness matters.** Repeated prefixes share KV cache and skip prefill, which inflates throughput on non-distinct workloads — the exact trap the [batch-sweep v2](docs/batch-sweep-v2.md) re-run was built to avoid. Benchmark with distinct prompts unless you're explicitly measuring cache hit rate.
+- **Schema is versioned for cross-upgrade comparability.** Every row carries the kernel, quantization, dtype, `max_model_len`, and `vllm`/`transformers`/`torch` versions, with `schema_version` on each. A row from today stays comparable against one taken three vLLM upgrades later — and a reviewer can see exactly what ran.
+
 ## Hardware / reproducibility
 
 - **GPU:** NVIDIA RTX 4060 Laptop, **8 GB VRAM** — the binding constraint on everything (7–8B models only fit at 4-bit; `max_model_len` capped at 2048).
