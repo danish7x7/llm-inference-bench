@@ -10,6 +10,21 @@ This is required under WSL which forces multiprocessing start method = spawn.
 
 from __future__ import annotations
 
+import os
+
+# --- WSL-specific vLLM workarounds -----------------------------------------
+# Must be set before vllm is imported anywhere. This module is imported (by
+# benchmark.py) before any `import vllm`, and the values propagate to vLLM's
+# spawned worker subprocesses through the inherited process environment.
+#   FLASHINFER_SAMPLER=0 — FlashInfer's sampler JIT-compiles a CUDA kernel that
+#     needs nvcc (not installed here); the native PyTorch sampler is correct for
+#     a single GPU.
+#   V2_MODEL_RUNNER=0   — the V2 model runner needs UVA, unavailable under WSL
+#     GPU passthrough ("UVA is not available"); force V1.
+# setdefault, not "=", so an explicit env override (e.g. from ~/.bashrc) wins.
+os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+os.environ.setdefault("VLLM_USE_V2_MODEL_RUNNER", "0")
+
 import time
 from typing import List, Optional
 

@@ -41,11 +41,11 @@ Rules for keeping it honest:
       verify: table of util -> KV cache tokens -> max concurrency.
 
 ### Code / robustness
-- [ ] Move WSL env-var workarounds into src/runners/vllm_runner.py as
+- [x] Move WSL env-var workarounds into src/runners/vllm_runner.py as
       os.environ.setdefault(...) at module top, before any vllm import.
-      verify: env -u VLLM_USE_FLASHINFER_SAMPLER -u VLLM_USE_V2_MODEL_RUNNER
-      python benchmark.py --model tinyllama --runner vllm --prompts short
-      still succeeds. Then optionally remove the bashrc lines.
+      — Verified with both vars unset from env; clean run (no nvcc/UVA errors),
+        TTFT 76ms / 94 tok/s / 7.9GB, unchanged from baseline. bashrc lines can
+        now be removed (optional).
 - [ ] Confirm mistral-7b / llama-3-8b registry entries load on current vLLM,
       or update/replace the AWQ configs that don't.
       verify: a clean run on at least one 4-bit 7-8B model.

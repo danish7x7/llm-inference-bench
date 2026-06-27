@@ -86,8 +86,10 @@ methodology matter as much as raw numbers.
   "Could not find nvcc". Worked around — see below.
 
 ### Known issues & workarounds (WSL-specific)
-Two env vars must be set before vLLM is imported. Currently in the user's
-~/.bashrc; moving them into code is a plan item.
+Two env vars must be set before vLLM is imported. Set in code via
+os.environ.setdefault(...) at the top of src/runners/vllm_runner.py (imported
+before any `import vllm`). May still be present in the user's ~/.bashrc too;
+the code uses setdefault so an explicit env value wins.
 - VLLM_USE_FLASHINFER_SAMPLER=0 — FlashInfer's sampler JIT-compiles a CUDA
   kernel needing nvcc (absent). Native PyTorch sampler is fine for single-GPU.
 - VLLM_USE_V2_MODEL_RUNNER=0 — the V2 model runner needs UVA, unavailable
